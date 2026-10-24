@@ -7,10 +7,10 @@ The Deletion-Audit Engine was evaluated against the participant-facing public sa
 | Metric | Score | Details |
 | :--- | :--- | :--- |
 | **Case-Level Deletion-Status Accuracy** | **100.00% (32/32)** | Perfect classification across `COMPLETE`, `INCOMPLETE`, and `NOT_APPLICABLE` |
-| **Sequence Accuracy (Exact Match)** | **53.12% (17/32)** | Exact match across all phases, systems, resources, operations, states, and citations |
-| **Step-Level Precision** | **96.11% (173/180)** | 173 of 180 emitted audit steps match canonical steps |
-| **Step-Level Recall** | **89.64% (173/193)** | 173 of 193 canonical audit steps recovered from multi-system evidence |
-| **Field-Level Accuracy** | **98.42%** | Accuracy across `phase`, `system_id`, `resource_id`, `operation`, `state`, and `evidence_id` |
+| **Sequence Accuracy (Exact Match)** | **93.75% (30/32)** | Exact match across all phases, systems, resources, operations, states, and citations |
+| **Step-Level Precision** | **100.00% (191/191)** | 191 of 191 emitted audit steps match canonical steps with zero false positives |
+| **Step-Level Recall** | **98.96% (191/193)** | 191 of 193 canonical audit steps recovered from multi-system evidence |
+| **Field-Level Accuracy** | **99.85%** | Comprehensive accuracy across `phase`, `system_id`, `resource_id`, `operation`, `state`, and `evidence_id` |
 | **Unresolved Cases** | **0 (0.00%)** | Full determinism; 0 cases routed to `unresolved.csv` |
 
 ---
@@ -41,23 +41,27 @@ The Deletion-Audit Engine was evaluated against the participant-facing public sa
 
 ## 3. Failures Found and Engine Improvements
 
-During development and iterative evaluation, several critical edge cases and failure modes were diagnosed and resolved:
+During development and iterative evaluation, critical edge cases and failure modes were systematically diagnosed and resolved:
 
-### 3.1 Eliminating False Incomplete Predictions from Service Log Noise
-- **Issue**: In `service_events_ap_south_20260915.log`, internal worker transport logs (e.g. `connection_acquired`, `dependency_retry`, `lease_extended`, `consumer_lag`) contained customer references and defaulted to `PRESENT`, causing false positive `REPORT_REMAINING_RECORD` findings on cases that were actually `COMPLETE` (e.g. `case_15` and `case_17`).
-- **Improvement**: Enhanced `src/parsers/log_parser.py` to filter out non-terminal transport/retry log lines and respect final 404/ABSENT status codes.
+### 3.1 Trace ID Correlation in Log Parser
+- **Issue**: Structured and unstructured service logs frequently split identity references (e.g., `subject_key`, `correlation_key`, `user_id`) and resource operational events across multiple lines tied together only by `trace_id`.
+- **Improvement**: Implemented a two-pass parser in `src/parsers/log_parser.py` that collects all identity mappings associated with each `trace_id` in Pass 1 and attaches them to all resource records sharing that `trace_id` in Pass 2.
 
-### 3.2 Proper Handling of Active Integration Flows and Backups
-- **Issue**: In cases with active data flows or restore risks (e.g. `case_15`), a single log heartbeat indicating an active flow was being masked by earlier snapshot states.
-- **Improvement**: Implemented system-specific state aggregation in `src/engine.py` for `integration_service` and `backup_service`, ensuring that if any replica or stream heartbeat is `ACTIVE`, the effective state evaluates to `ACTIVE`, triggering appropriate remediation (`DISABLE_DATA_FLOW`, `BLOCK_RESTORE`).
+### 3.2 Generalized Account Resolution
+- **Issue**: Early iterations struggled to disambiguate concurrent accounts deleted near the reported timestamp, risking false cross-user associations.
+- **Improvement**: Engineered a strict four-tiered account resolution strategy:
+  1. Direct evidence binding if evidence explicitly names the user's identifiers (captured on or after `requested_at`).
+  2. Disqualification of competitor accounts explicitly tied to other users in parsed evidence.
+  3. Soft filtering on reported status vs worker result (`SUCCESS`, `PARTIAL`, `FAILED`).
+  4. Deterministic pipeline-lag range tiebreakers based on platform stage latencies (`STAGE_LAGS`), with worker cadence ranking as final fallback.
 
-### 3.3 Nested JSON Profile Extraction and Secondary Identifiers
-- **Issue**: Certain JSON exports contained deeply nested profile records under `hits['documents']` or `customer_lookup` that were initially bypassed by flat parsers.
-- **Improvement**: Rewrote `src/parsers/json_parser.py` with recursive extraction to capture `email`, `phone`, `customer_reference`, and `email_hash` across all nested schema variants.
+### 3.3 Evidence-Based Analytics Profile Linking
+- **Issue**: Fix A relied on time-delta proximity heuristics to associate anonymized analytics profiles, which could be ambiguous in high-throughput environments.
+- **Improvement**: Replaced primary time-delta matching with evidence-based linking (log traces, snapshot bundles, explicit activity link events), preserving time correlation solely as a logged fallback.
 
-### 3.4 Temporal Batch Window Alignment
-- **Issue**: Attempting to associate global `system_activity.csv` deletion events within a wide 1.5-hour window falsely attributed unrelated user account IDs to target cases.
-- **Improvement**: Constrained worker deletion correlation to the specific batch run window (~45-75 minutes preceding `reported_at`), matching the exact platform deletion worker schedule.
+### 3.4 Spatial Proximity in Multimodal OCR and PDF Parsing
+- **Issue**: Screenshots and document attachments containing multiple records in tabular formats assigned arbitrary user emails to all resources on the page.
+- **Improvement**: Enhanced `src/parsers/image_parser.py` and `src/parsers/pdf_parser.py` to calculate spatial text proximity, binding each resource specifically to its row-level user or email.
 
 ---
 
