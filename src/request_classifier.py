@@ -5,16 +5,24 @@ class RequestClassifier:
     
     NON_DELETION_PHRASES = [
         r'leave the account active',
-        r'keep the account as it is',
+        r'keep the account',
         r'leave my profile',
         r'want to continue using the service',
-        r'do not close my account',
-        r'do not delete my account',
+        r'do(?: not|n\'t) close (?:the|my) account',
+        r'do(?: not|n\'t) delete',
         r'replace it with the new one',
         r'change the email address',
         r'download my account information',
-        r'copy of last year',
+        r'copy of (?:last year|the information)',
         r'portable format',
+        r'not asking for deletion',
+        r'not a request to erase',
+        r'without removing any of my records',
+        r'marketing lists only',
+        r'resetting the login',
+        r"can't access my profile",
+        r'misspelled on the account',
+        r'information request',
     ]
 
     DELETION_KEYWORDS = [
