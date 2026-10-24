@@ -14,38 +14,92 @@ def parse_log_file(file_id: str, file_path: str, origin: str, captured_at: str) 
     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
         lines = [line.strip() for line in f if line.strip()]
 
-    # First pass: collect trace info (especially from _started events)
+    # First pass: collect trace info from ALL lines (JSON or key=value)
     for line in lines:
-        t_match = re.search(r'\btrace_id=([a-zA-Z0-9_\-]+)', line)
-        if t_match:
-            t_id = t_match.group(1)
-            t_data = traces.setdefault(t_id, {})
+        t_id = None
+        # Check JSON first
+        json_start = line.find('{')
+        json_end = line.rfind('}')
+        if json_start != -1 and json_end > json_start:
+            try:
+                d = json.loads(line[json_start:json_end+1])
+                t_id = d.get('trace_id') or d.get('requestId')
+                if t_id:
+                    t_data = traces.setdefault(str(t_id), {})
+                    if d.get('resource_id'):
+                        t_data['resource_id'] = d.get('resource_id')
+                    if d.get('service') or d.get('system'):
+                        t_data['service'] = d.get('service') or d.get('system')
 
-            r_match = re.search(r'\bresource_id=([a-zA-Z0-9_\-]+)', line)
-            if r_match:
-                t_data['resource_id'] = r_match.group(1)
+                    # Subject / User ref
+                    for k in ('subject_ref', 'subject_reference', 'user_id', 'customer_reference', 'lookup_key', 'correlation_key', 'subject_key'):
+                        val = d.get(k)
+                        if val and str(val).lower().startswith('user_'):
+                            t_data['user_id'] = str(val).lower()
+                            t_data['subject_reference'] = str(val).lower()
+                            t_data['customer_reference'] = str(val).lower()
+                            break
 
-            s_match = re.search(r'\bservice=([a-zA-Z0-9_\-]+)', line)
-            if s_match:
-                t_data['service'] = s_match.group(1)
+                    # Email
+                    for k in ('email', 'lookup_key', 'requester_email', 'customer_email', 'matched_value', 'correlation_key', 'subject_key'):
+                        val = d.get(k)
+                        if val and '@' in str(val):
+                            t_data['email'] = str(val).lower()
+                            break
 
-            e_match = re.search(r'\b(?:email|lookup_key|requester_email|customer_email|correlation_key|subject_key|matched_value)=(?:")?([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})(?:")?', line, re.I)
-            if e_match:
-                t_data['email'] = e_match.group(1).lower()
+                    # Email hash
+                    for k in ('email_hash', 'lookup_key', 'correlation_key'):
+                        val = str(d.get(k, ''))
+                        if len(val) == 64 and all(c in '0123456789abcdefABCDEF' for c in val):
+                            t_data['email_hash'] = val.lower()
+                            break
 
-            h_match = re.search(r'\b(?:email_hash|lookup_key|correlation_key)=(?:")?([a-fA-F0-9]{64})(?:")?', line)
-            if h_match:
-                t_data['email_hash'] = h_match.group(1).lower()
+                    # Phone
+                    for k in ('phone', 'requester_phone', 'matched_value'):
+                        val = d.get(k)
+                        if val:
+                            t_data['phone'] = str(val)
+                            break
+            except Exception:
+                pass
 
-            u_match = re.search(r'\b(?:lookup_key|correlation_key|subject_reference|subject_ref|subject_key|customer_reference)=(?:")?(user_\d+)(?:")?', line, re.I)
-            if u_match:
-                t_data['user_id'] = u_match.group(1).lower()
+        # Also check regex for key=value lines or embedded trace_ids
+        if not t_id:
+            t_match = re.search(r'["\']?trace_id["\']?\s*[:=]\s*["\']?([a-zA-Z0-9_\-]+)', line, re.I)
+            if not t_match:
+                t_match = re.search(r'requestId=([a-zA-Z0-9_\-]+)', line, re.I)
+            if t_match:
+                t_id = t_match.group(1)
+                t_data = traces.setdefault(t_id, {})
 
-            p_match = re.search(r'\b(?:phone|requester_phone|lookup_key|matched_value)=(?:")?(\+?[\d\s\-]{8,}\d)(?:")?', line)
-            if p_match:
-                t_data['phone'] = p_match.group(1)
+                r_match = re.search(r'resource_id=([a-zA-Z0-9_\-]+)', line)
+                if r_match:
+                    t_data['resource_id'] = r_match.group(1)
 
-    # Second pass: parse records
+                s_match = re.search(r'service=([a-zA-Z0-9_\-]+)', line)
+                if s_match:
+                    t_data['service'] = s_match.group(1)
+
+                e_match = re.search(r'\b(?:email|lookup_key|requester_email|customer_email|correlation_key|subject_key|matched_value)=(?:")?([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})(?:")?', line, re.I)
+                if e_match:
+                    t_data['email'] = e_match.group(1).lower()
+
+                h_match = re.search(r'\b(?:email_hash|lookup_key|correlation_key)=(?:")?([a-fA-F0-9]{64})(?:")?', line)
+                if h_match:
+                    t_data['email_hash'] = h_match.group(1).lower()
+
+                u_match = re.search(r'\b(?:lookup_key|correlation_key|subject_reference|subject_ref|subject_key|customer_reference)=(?:")?(user_\d+)(?:")?', line, re.I)
+                if u_match:
+                    uid = u_match.group(1).lower()
+                    t_data['user_id'] = uid
+                    t_data['subject_reference'] = uid
+                    t_data['customer_reference'] = uid
+
+                p_match = re.search(r'\b(?:phone|requester_phone|lookup_key|matched_value)=(?:")?(\+?[\d\s\-]{8,}\d)(?:")?', line)
+                if p_match:
+                    t_data['phone'] = p_match.group(1)
+
+    # Second pass: parse records and attach correlated trace info
     for line in lines:
         # Case A: JSON structured log line
         json_start = line.find('{')
@@ -53,9 +107,12 @@ def parse_log_file(file_id: str, file_path: str, origin: str, captured_at: str) 
         if json_start != -1 and json_end > json_start:
             try:
                 d = json.loads(line[json_start:json_end+1])
-                r_id = d.get('resource_id')
+                t_id = d.get('trace_id') or d.get('requestId')
+                t_info = traces.get(str(t_id), {}) if t_id else {}
+
+                r_id = d.get('resource_id') or t_info.get('resource_id')
                 if r_id:
-                    sys_id = d.get('service') or d.get('system') or 'account_service'
+                    sys_id = d.get('service') or d.get('system') or t_info.get('service') or 'account_service'
                     state = 'PRESENT'
                     if d.get('status_code') == 404 or d.get('rows') == 0 or d.get('rows') == '0' or d.get('http_status') == 404:
                         state = 'ABSENT'
@@ -72,19 +129,27 @@ def parse_log_file(file_id: str, file_path: str, origin: str, captured_at: str) 
                     elif d.get('restore_allowed') is True or str(d.get('restore_allowed')).lower() in ('true', '1', 'active'):
                         state = 'ACTIVE'
 
-                    email = d.get('email') or d.get('lookup_key') or d.get('correlation_key')
+                    email = d.get('email') or d.get('lookup_key') or d.get('correlation_key') or t_info.get('email')
                     if email and '@' not in str(email):
-                        email = None
+                        email = t_info.get('email')
 
                     email_hash = d.get('email_hash')
                     for k in ('correlation_key', 'lookup_key'):
                         val = str(d.get(k, ''))
                         if len(val) == 64 and all(c in '0123456789abcdefABCDEF' for c in val):
                             email_hash = val.lower()
+                    if not email_hash:
+                        email_hash = t_info.get('email_hash')
 
-                    user_id = d.get('user_id') or d.get('correlation_key') or d.get('subject_reference')
-                    if user_id and not str(user_id).startswith('user_'):
-                        user_id = None
+                    user_id = d.get('user_id') or d.get('subject_ref') or d.get('subject_reference') or d.get('customer_reference') or d.get('correlation_key')
+                    if user_id and str(user_id).startswith('user_'):
+                        user_id = str(user_id).lower()
+                    else:
+                        user_id = t_info.get('user_id')
+
+                    cust_ref = d.get('customer_reference') or t_info.get('customer_reference') or user_id
+                    subj_ref = d.get('subject_reference') or d.get('subject_ref') or t_info.get('subject_reference') or user_id
+                    phone = d.get('phone') or t_info.get('phone')
 
                     data_cat = 'USER_PROFILE'
                     if sys_id == 'search_service':
@@ -92,7 +157,7 @@ def parse_log_file(file_id: str, file_path: str, origin: str, captured_at: str) 
                     elif sys_id == 'analytics_platform':
                         data_cat = 'ANALYTICS_PROFILE'
                     elif sys_id in ('support_platform', 'support_replica'):
-                        if r_id.startswith('support_00') or r_id.startswith('attachment_'):
+                        if str(r_id).startswith('support_00') or str(r_id).startswith('attachment_'):
                             data_cat = 'SUPPORT_ATTACHMENT'
                         else:
                             data_cat = 'SUPPORT_MESSAGE'
@@ -117,11 +182,11 @@ def parse_log_file(file_id: str, file_path: str, origin: str, captured_at: str) 
                         data_category=data_cat,
                         state=state,
                         user_id=user_id,
-                        customer_reference=d.get('customer_reference'),
-                        subject_reference=d.get('subject_reference') or user_id,
+                        customer_reference=cust_ref,
+                        subject_reference=subj_ref,
                         email=email.lower() if email else None,
                         email_hash=email_hash,
-                        phone=d.get('phone'),
+                        phone=phone,
                         name=d.get('name') or d.get('display_name'),
                         raw_details=d
                     ))
@@ -135,7 +200,10 @@ def parse_log_file(file_id: str, file_path: str, origin: str, captured_at: str) 
             continue
 
         r_match = re.search(r'\bresource_id=([a-zA-Z0-9_\-]+)', line)
-        t_match = re.search(r'\btrace_id=([a-zA-Z0-9_\-]+)', line)
+        t_match = re.search(r'["\']?trace_id["\']?\s*[:=]\s*["\']?([a-zA-Z0-9_\-]+)', line, re.I)
+        if not t_match:
+            t_match = re.search(r'requestId=([a-zA-Z0-9_\-]+)', line, re.I)
+
         t_id = t_match.group(1) if t_match else None
         t_info = traces.get(t_id, {}) if t_id else {}
 
