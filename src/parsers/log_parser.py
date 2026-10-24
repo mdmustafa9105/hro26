@@ -59,13 +59,17 @@ def parse_log_file(file_id: str, file_path: str, origin: str, captured_at: str) 
                     state = 'PRESENT'
                     if d.get('status_code') == 404 or d.get('rows') == 0 or d.get('rows') == '0' or d.get('http_status') == 404:
                         state = 'ABSENT'
-                    elif d.get('enabled') is False or str(d.get('enabled')).lower() == 'false':
+                    elif d.get('enabled') is False or str(d.get('enabled')).lower() in ('false', '0', 'disabled'):
                         state = 'DISABLED'
-                    elif d.get('enabled') is True or str(d.get('enabled')).lower() == 'true':
+                    elif d.get('enabled') is True or str(d.get('enabled')).lower() in ('true', '1', 'active'):
                         state = 'ACTIVE'
-                    elif d.get('restore_allowed') is False or str(d.get('restore_allowed')).lower() == 'false':
+                    elif d.get('result') in ('DISABLED', 'disabled') or d.get('status') in ('DISABLED', 'disabled'):
+                        state = 'DISABLED'
+                    elif d.get('result') in ('ACTIVE', 'active') or d.get('status') in ('ACTIVE', 'active'):
+                        state = 'ACTIVE'
+                    elif d.get('restore_allowed') is False or str(d.get('restore_allowed')).lower() in ('false', '0', 'blocked'):
                         state = 'BLOCKED'
-                    elif d.get('restore_allowed') is True or str(d.get('restore_allowed')).lower() == 'true':
+                    elif d.get('restore_allowed') is True or str(d.get('restore_allowed')).lower() in ('true', '1', 'active'):
                         state = 'ACTIVE'
 
                     email = d.get('email') or d.get('lookup_key') or d.get('correlation_key')
@@ -174,24 +178,25 @@ def parse_log_file(file_id: str, file_path: str, origin: str, captured_at: str) 
 
         # Determine state
         state = 'PRESENT'
-        if 'http_status=404' in line or 'rows=0' in line or 'total_hits=0' in line or 'status=NOT_FOUND' in line:
+        clean_line = line.replace('"', '').replace("'", "")
+        if 'http_status=404' in clean_line or 'rows=0' in clean_line or 'total_hits=0' in clean_line or 'status=NOT_FOUND' in clean_line:
             state = 'ABSENT'
-        elif 'enabled=true' in line or 'enabled=1' in line or 'status=ACTIVE' in line:
+        elif any(k in clean_line for k in ('enabled=true', 'enabled=1', 'status=ACTIVE', 'result=ACTIVE', 'remains enabled', 'is active')):
             state = 'ACTIVE'
-        elif 'enabled=false' in line or 'enabled=0' in line or 'status=DISABLED' in line:
+        elif any(k in clean_line for k in ('enabled=false', 'enabled=0', 'status=DISABLED', 'result=DISABLED', 'flow disabled', 'connector stopped')):
             state = 'DISABLED'
-        elif 'restore_allowed=false' in line or 'status=BLOCKED' in line or 'deletion_block=true' in line:
+        elif any(k in clean_line for k in ('restore_allowed=false', 'status=BLOCKED', 'deletion_block=true')):
             state = 'BLOCKED'
-        elif 'restore_allowed=true' in line or 'deletion_block=false' in line:
+        elif any(k in clean_line for k in ('restore_allowed=true', 'deletion_block=false')):
             state = 'ACTIVE'
-        elif 'marker_found=false' in line:
+        elif 'marker_found=false' in clean_line:
             state = 'PRESENT'
-        elif 'marker_found=true' in line:
+        elif 'marker_found=true' in clean_line:
             state = 'ABSENT'
-        elif sys_id == 'analytics_platform' and ('ANONYMIZED' in line or 'no direct identifier' in line or 'email=null' in line):
-            if 'email=null' in line and 'customer_reference=null' in line:
+        elif sys_id == 'analytics_platform' and ('ANONYMIZED' in clean_line or 'no direct identifier' in clean_line or 'email=null' in clean_line):
+            if 'email=null' in clean_line and 'customer_reference=null' in clean_line:
                 state = 'ANONYMIZED'
-        elif r_id.startswith('tombstone_') and ('REDACTED' in line or 'pii=none' in line or 'email=null' in line):
+        elif r_id.startswith('tombstone_') and ('REDACTED' in clean_line or 'pii=none' in clean_line or 'email=null' in clean_line):
             state = 'REDACTED'
 
         data_cat = 'USER_PROFILE'

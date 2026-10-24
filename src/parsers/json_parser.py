@@ -60,7 +60,12 @@ def parse_json_file(file_id: str, file_path: str, origin: str, captured_at: str)
                     state = 'PRESENT'
                 elif sys_id == 'integration_service':
                     data_cat = 'DATA_FLOW'
-                    is_active = rec.get('enabled') in (True, 1, 'ACTIVE', 'true')
+                    val = rec.get('enabled')
+                    if val is None:
+                        val = rec.get('status')
+                    if val is None:
+                        val = rec.get('state')
+                    is_active = val in (True, 1, 'ACTIVE', 'true') or str(val).lower() in ('true', '1', 'active')
                     state = 'ACTIVE' if is_active else 'DISABLED'
                 elif sys_id == 'backup_service':
                     data_cat = 'BACKUP_ARCHIVE'
@@ -69,6 +74,10 @@ def parse_json_file(file_id: str, file_path: str, origin: str, captured_at: str)
                 elif sys_id == 'security_service':
                     data_cat = 'SECURITY_AUDIT_LOG'
                     state = 'PRESENT'
+
+                sel = rec.get('subject_selector')
+                sel_email = str(sel).lower() if sel and '@' in str(sel) else None
+                sel_user_id = str(sel).lower() if sel and str(sel).lower().startswith('user_') else None
 
                 records.append(EvidenceRecord(
                     evidence_id=file_id,
@@ -79,10 +88,10 @@ def parse_json_file(file_id: str, file_path: str, origin: str, captured_at: str)
                     resource_id=r_id,
                     data_category=data_cat,
                     state=state,
-                    user_id=rec.get('user_id'),
-                    customer_reference=rec.get('customer_reference'),
-                    subject_reference=rec.get('subject_reference'),
-                    email=rec.get('email') or rec.get('owner_email') or rec.get('customer_email') or rec.get('requester_email'),
+                    user_id=rec.get('user_id') or sel_user_id,
+                    customer_reference=rec.get('customer_reference') or (sel if not sel_email else None),
+                    subject_reference=rec.get('subject_reference') or sel,
+                    email=rec.get('email') or rec.get('owner_email') or rec.get('customer_email') or rec.get('requester_email') or sel_email,
                     phone=rec.get('phone') or rec.get('owner_phone') or rec.get('requester_phone'),
                     email_hash=rec.get('email_hash'),
                     name=rec.get('name') or rec.get('full_name') or rec.get('display_name') or rec.get('uploaded_by'),
@@ -128,7 +137,13 @@ def parse_json_file(file_id: str, file_path: str, origin: str, captured_at: str)
                         state = 'PRESENT'
                     elif sys_id == 'integration_service':
                         data_cat = 'DATA_FLOW'
-                        enabled = item.get('enabled') in (True, 1, 'ACTIVE', 'true')
+                        val = item.get('enabled')
+                        if val is None:
+                            val = item.get('status')
+                        if val is None:
+                            val = item.get('state')
+                        enabled = val in (True, 1, 'ACTIVE', 'true') or str(val).lower() in ('true', '1', 'active')
+                        state = 'ACTIVE' if enabled else 'DISABLED'
                     elif sys_id == 'search_service':
                         data_cat = 'SEARCH_INDEX_ENTRY'
                         hits = item.get('hits')
@@ -151,12 +166,16 @@ def parse_json_file(file_id: str, file_path: str, origin: str, captured_at: str)
                         has_pii = any(item.get(k) for k in ('requester_name', 'requester_email', 'requester_phone', 'email', 'phone', 'name'))
                         state = 'PRESENT' if has_pii else 'REDACTED'
 
-                    email = item.get('email') or item.get('owner_email') or item.get('customer_email') or item.get('requester_email')
+                    sel = item.get('subject_selector')
+                    sel_email = str(sel).lower() if sel and '@' in str(sel) else None
+                    sel_user_id = str(sel).lower() if sel and str(sel).lower().startswith('user_') else None
+
+                    email = item.get('email') or item.get('owner_email') or item.get('customer_email') or item.get('requester_email') or sel_email
                     phone = item.get('phone') or item.get('owner_phone') or item.get('requester_phone')
                     name = item.get('requester_name') or item.get('name') or item.get('full_name')
-                    user_id = item.get('user_id') or (item.get('customer_reference') if str(item.get('customer_reference', '')).startswith('user_') else None) or (item.get('subject_reference') if str(item.get('subject_reference', '')).startswith('user_') else None)
-                    customer_reference = item.get('customer_reference')
-                    subject_reference = item.get('subject_reference') or item.get('customer_reference')
+                    user_id = item.get('user_id') or sel_user_id or (item.get('customer_reference') if str(item.get('customer_reference', '')).startswith('user_') else None) or (item.get('subject_reference') if str(item.get('subject_reference', '')).startswith('user_') else None)
+                    customer_reference = item.get('customer_reference') or (sel if not sel_email else None)
+                    subject_reference = item.get('subject_reference') or item.get('customer_reference') or sel
                     email_hash = item.get('email_hash')
 
                     # Deep unpack profile if present (e.g. account_service profile_lookups)

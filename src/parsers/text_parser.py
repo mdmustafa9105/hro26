@@ -20,22 +20,21 @@ def parse_text_file(file_id: str, file_path: str, origin: str, captured_at: str)
 
             event_time, sys_id, r_id, cat, status, ident = parts[:6]
 
+            status_clean = status.upper().strip()
             state = 'PRESENT'
-            if status == 'NOT_FOUND':
+            if status_clean in ('NOT_FOUND', 'ABSENT'):
                 state = 'ABSENT'
-            elif status == 'FOUND':
+            elif status_clean in ('FOUND', 'PRESENT', 'IDENTIFIABLE'):
                 state = 'PRESENT'
-            elif status == 'IDENTIFIABLE':
-                state = 'PRESENT'
-            elif status == 'ANONYMIZED':
+            elif status_clean == 'ANONYMIZED':
                 state = 'ANONYMIZED'
-            elif status == 'ACTIVE':
+            elif status_clean in ('ACTIVE', 'ENABLED', 'REMAINS ENABLED'):
                 state = 'ACTIVE'
-            elif status == 'DISABLED':
+            elif status_clean in ('DISABLED', 'STOPPED', 'BLOCKED_FLOW'):
                 state = 'DISABLED'
-            elif status == 'BLOCKED':
+            elif status_clean in ('BLOCKED', 'BLOCKED_RESTORE'):
                 state = 'BLOCKED'
-            elif status == 'REDACTED':
+            elif status_clean == 'REDACTED':
                 state = 'REDACTED'
 
             email = None
