@@ -112,6 +112,7 @@ def parse_json_file(file_id: str, file_path: str, origin: str, captured_at: str)
                     r_id = item.get('resource_id')
                     if not r_id:
                         continue
+                    item_captured_at = item.get('observed_at') or item.get('captured_at') or data.get('exported_at') or captured_at
 
                     data_cat = 'USER_PROFILE'
                     state = 'PRESENT'
@@ -223,7 +224,7 @@ def parse_json_file(file_id: str, file_path: str, origin: str, captured_at: str)
                     records.append(EvidenceRecord(
                         evidence_id=file_id,
                         file_path=file_path,
-                        captured_at=captured_at,
+                        captured_at=item_captured_at,
                         origin=origin,
                         system_id=sys_id,
                         resource_id=r_id,

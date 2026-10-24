@@ -37,6 +37,17 @@ def parse_pdf_file(file_id: str, file_path: str, origin: str, captured_at: str) 
                 sys_id = 'account_service'
                 data_cat = 'USER_PROFILE'
 
+            r_pos = text.lower().find(r_id.lower())
+            best_email = None
+            if emails:
+                email_matches = [(m.start(), m.group().lower()) for m in re.finditer(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', text)]
+                best_email = min(email_matches, key=lambda em: (0 if em[0] >= r_pos else 1, abs(em[0] - r_pos)))[1]
+
+            best_user = None
+            if users:
+                user_matches = [(m.start(), m.group().lower()) for m in re.finditer(r'\buser_\d+\b', text, re.I)]
+                best_user = min(user_matches, key=lambda um: (0 if um[0] >= r_pos else 1, abs(um[0] - r_pos)))[1]
+
             records.append(EvidenceRecord(
                 evidence_id=file_id,
                 file_path=file_path,
@@ -46,8 +57,8 @@ def parse_pdf_file(file_id: str, file_path: str, origin: str, captured_at: str) 
                 resource_id=r_id,
                 data_category=data_cat,
                 state='PRESENT',
-                user_id=list(users)[0] if users else None,
-                email=list(emails)[0].lower() if emails else None,
+                user_id=best_user,
+                email=best_email,
                 raw_details={'text_snippet': text[:500]}
             ))
     elif emails or users:

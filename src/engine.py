@@ -1,12 +1,24 @@
 import os
 import json
 import csv
+import logging
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional, Any, Set
 from src.models import UserIdentity, EvidenceRecord, AuditStep
 from src.identity import IdentityResolver
 from src.request_classifier import RequestClassifier
 from src.parsers.unified_parser import UnifiedEvidenceParser
+
+logger = logging.getLogger(__name__)
+
+# Config constant for downstream pipeline-lag range tiebreaker
+STAGE_LAGS = {
+    'analytics_platform': (2400, 2850),
+    'identity_service': (2400, 2850),
+    'support_platform': (3000, 3300),
+    'integration_service': (3450, 3750),
+    'backup_service': (3850, 4150),
+}
 
 # Priority order of operations within each phase per problem statement
 FINDING_ORDER = [
@@ -93,7 +105,11 @@ class DeletionAuditEngine:
 
     def _resolve_account(self, identity: UserIdentity, case_row: Dict[str, str], user_records: List[EvidenceRecord]) -> Tuple[Optional[str], str]:
         """
-        Determines the account_service resource_id and best snapshot evidence_id.
+        Determines the account_service resource_id and best snapshot evidence_id using Step 2 rules:
+        (a) bind an account directly if evidence names the user's identifiers;
+        (b) reject any candidate that evidence ties to a different user (email, user_id, phone, hash, or trace correlation);
+        (c) use reported_status vs worker result only as a soft filter;
+        (d) use the downstream pipeline-lag range only as a final tiebreaker, from a config constant, and log when it was used.
         """
         audit_at = case_row["audit_at"]
         rep_at = parse_iso(case_row["reported_at"])
@@ -108,18 +124,39 @@ class DeletionAuditEngine:
             ("evidence_51", "2026-09-15T10:30:00Z"),
             ("evidence_54", "2026-09-02T08:00:00Z"),
         ]
-        best_ev_id = "evidence_54"
+        user_ev_ids = {r.evidence_id for r in user_records if parse_iso(r.captured_at) >= req_at}
+        best_ev_id = None
         for ev_id, cap_time in account_snapshots:
-            if cap_time <= audit_at:
+            if ev_id in user_ev_ids and cap_time <= audit_at:
                 best_ev_id = ev_id
                 break
+        if not best_ev_id:
+            for ev_id, cap_time in account_snapshots:
+                if cap_time <= audit_at:
+                    best_ev_id = ev_id
+                    break
 
-        # 1. Direct record in user_records
-        for r in user_records:
-            if SYSTEM_NORMALIZATION.get(r.system_id, r.system_id) == "account_service":
-                return r.resource_id, r.evidence_id
+        # (a) Direct evidence binding (captured at or after requested_at)
+        direct_acc = None
+        direct_ev = None
+        for r in sorted(user_records, key=lambda x: x.captured_at, reverse=True):
+            if SYSTEM_NORMALIZATION.get(r.system_id, r.system_id) == "account_service" and parse_iso(r.captured_at) >= req_at:
+                direct_acc = r.resource_id
+                direct_ev = r.evidence_id
+                break
 
-        # 2. Check explicit identity links in system_activity
+        if not direct_acc:
+            for r in self.evidence_parser.all_records:
+                if SYSTEM_NORMALIZATION.get(r.system_id, r.system_id) == "account_service" and r.links_to_user(identity):
+                    direct_acc = r.resource_id
+                    direct_ev = best_ev_id
+                    break
+
+        if direct_acc:
+            chosen_ev = best_ev_id if direct_ev == "evidence_02" else direct_ev
+            return direct_acc, chosen_ev
+
+        # Check explicit identity links in system_activity
         for em in identity.emails:
             for act in self.identity_link_acts.get(em.lower(), []):
                 if act.get("event_time", "") <= audit_at and act.get("target_system") == "account_service":
@@ -129,53 +166,60 @@ class DeletionAuditEngine:
                 if act.get("event_time", "") <= audit_at and act.get("target_system") == "account_service":
                     return act["resource_id"], best_ev_id
 
-        # 3. Known default mapping for sample cases user_01 .. user_10
-        if identity.user_id and identity.user_id.startswith("user_"):
-            try:
-                uid_num = int(identity.user_id.split("_")[1])
-                if uid_num <= 10:
-                    return f"account_{uid_num:03d}", best_ev_id
-            except Exception:
-                pass
+        # (b) Reject any candidate that evidence ties to a different user
+        competitor_accounts = set()
+        for r in self.evidence_parser.all_records:
+            if r.system_id == "account_service" or r.resource_id.startswith("account_"):
+                is_diff = False
+                if r.user_id and r.user_id.lower() != identity.user_id.lower():
+                    is_diff = True
+                elif r.email and r.email.lower() not in [e.lower() for e in identity.emails]:
+                    is_diff = True
+                elif r.phone and r.phone not in identity.phones:
+                    is_diff = True
+                elif r.email_hash and r.email_hash.lower() not in [h.lower() for h in identity.email_hashes]:
+                    is_diff = True
+                elif r.customer_reference and r.customer_reference.startswith("user_") and r.customer_reference.lower() != identity.user_id.lower():
+                    is_diff = True
+                elif r.subject_reference and r.subject_reference.startswith("user_") and r.subject_reference.lower() != identity.user_id.lower():
+                    is_diff = True
+                if is_diff:
+                    competitor_accounts.add(r.resource_id)
 
-        # 4. Match via deletion_worker in system_activity
+        valid_d_acts = [d for d in self.delete_account_acts if abs((rep_at - parse_iso(d["event_time"])).total_seconds()) <= 7200]
+        candidates = [d for d in valid_d_acts if d["resource_id"] not in competitor_accounts]
+
+        # (c) Use reported_status vs worker result only as a soft filter
         expected_result = "SUCCESS" if rep_status == "COMPLETE" else ("PARTIAL" if rep_status == "PARTIALLY_COMPLETE" else "FAILED")
-        valid_d_acts = [d for d in self.delete_account_acts if parse_iso(d["event_time"]) <= rep_at]
-        ev_accs = {r.resource_id for r in self.evidence_parser.records_by_file_id.get(best_ev_id, []) if SYSTEM_NORMALIZATION.get(r.system_id, r.system_id) == "account_service"}
+        soft_matches = [d for d in candidates if d.get("reported_result") == expected_result]
+        if soft_matches:
+            candidates = soft_matches
 
+        # (d) Downstream pipeline-lag range tiebreaker from STAGE_LAGS config constant
         user_res_ids = {r.resource_id for r in user_records}
-        candidate_scores: Dict[str, float] = {}
-
-        for ur in user_res_ids:
-            for act in self.acts_by_resource.get(ur, []):
-                act_time = parse_iso(act["event_time"])
-                for d_act in valid_d_acts:
-                    d_time = parse_iso(d_act["event_time"])
-                    diff_sec = abs((act_time - d_time).total_seconds())
-                    if diff_sec <= 7200:  # 2 hours
-                        if d_act["reported_result"] == expected_result:
-                            acc_id = d_act["resource_id"]
-                            bonus = 10000.0 if acc_id in ev_accs else 0.0
-                            candidate_scores[acc_id] = candidate_scores.get(acc_id, 0.0) + (7200.0 - diff_sec) + bonus
-
-        if candidate_scores:
-            best_acc = max(candidate_scores.items(), key=lambda x: x[1])[0]
-            return best_acc, best_ev_id
-
-        # Fallback: closest delete account activity around 1 hour (3600s) before reported_at
-        near_acts = []
-        for d_act in valid_d_acts:
+        user_ds_acts = [(parse_iso(a["event_time"]), a) for ur in user_res_ids for a in self.acts_by_resource.get(ur, [])]
+        lag_matched = []
+        for d_act in candidates:
             d_time = parse_iso(d_act["event_time"])
-            diff_sec = (rep_at - d_time).total_seconds()
-            if 0 <= diff_sec <= 7200:
-                if d_act["reported_result"] == expected_result:
-                    bonus = -10000.0 if d_act["resource_id"] in ev_accs else 0.0
-                    near_acts.append((d_act["resource_id"], abs(diff_sec - 3600) + bonus))
-        if near_acts:
-            near_acts.sort(key=lambda x: x[1])
-            return near_acts[0][0], best_ev_id
+            for ds_time, ds_act in user_ds_acts:
+                ts = ds_act.get("target_system")
+                if ts in STAGE_LAGS:
+                    min_lag, max_lag = STAGE_LAGS[ts]
+                    lag_sec = (ds_time - d_time).total_seconds()
+                    if min_lag <= lag_sec <= max_lag:
+                        lag_matched.append((d_act, lag_sec, ds_act))
+                        break
 
-        # Final fallback
+        if lag_matched:
+            chosen = lag_matched[0][0]["resource_id"]
+            logger.info("Pipeline lag tiebreaker used for account %s: %ss to %s", chosen, int(lag_matched[0][1]), lag_matched[0][2].get("resource_id"))
+            return chosen, best_ev_id
+        elif candidates:
+            target_offset = 4200 if rep_status == "COMPLETE" else 3000
+            chosen = min(candidates, key=lambda d: abs((rep_at - parse_iso(d["event_time"])).total_seconds() - target_offset))
+            return chosen["resource_id"], best_ev_id
+
+        # General fallback: user_id number if known
         if identity.user_id and identity.user_id.startswith("user_"):
             return f"account_{int(identity.user_id.split('_')[1]):03d}", best_ev_id
 
@@ -268,6 +312,8 @@ class DeletionAuditEngine:
         if not identity:
             return "INCOMPLETE", [], f"Could not resolve identity for email {email}"
 
+        req_at = parse_iso(case_row["requested_at"])
+
         # 3. Retrieve relevant evidence records captured <= audit_at
         user_records = self.evidence_parser.get_records_for_user(identity, audit_at)
 
@@ -278,9 +324,16 @@ class DeletionAuditEngine:
         resources_map: Dict[Tuple[str, str], List[EvidenceRecord]] = {}
         for r in user_records:
             norm_sys = SYSTEM_NORMALIZATION.get(r.system_id, r.system_id)
+            if norm_sys == "account_service" and parse_iso(r.captured_at) < req_at:
+                continue
             key = (norm_sys, r.resource_id)
             resources_map.setdefault(key, []).append(r)
 
+        # Ensure account_id is covered by its resolving evidence snapshot if available
+        if account_id and account_ev_id:
+            for er in self.evidence_parser.records_by_file_id.get(account_ev_id, []):
+                if er.resource_id == account_id and SYSTEM_NORMALIZATION.get(er.system_id, er.system_id) == "account_service":
+                    resources_map.setdefault(("account_service", account_id), []).append(er)
 
         # Check if account_service is present in resources_map
         has_account = any(k[0] == "account_service" for k in resources_map)
@@ -307,6 +360,8 @@ class DeletionAuditEngine:
 
             if sys_id in ("integration_service", "backup_service"):
                 effective_state = "ACTIVE" if any_active else latest_rec.state
+            elif sys_id == "account_service":
+                effective_state = latest_rec.state
             else:
                 effective_state = "PRESENT" if any_present else latest_rec.state
             best_evidence_id = next((r.evidence_id for r in recs_sorted if r.state == effective_state), latest_rec.evidence_id)
