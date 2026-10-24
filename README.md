@@ -34,10 +34,33 @@ Your solution must:
 Run the starter Python entry point with:
 
 ```bash
-python3 code/main.py
+python code/main.py
+```
+
+This will run the Deletion-Audit Engine across all 518 cases in `dataset/deletion_requests.csv` and generate the final `output.csv` at the repository root.
+
+### Running Evaluation
+
+To run the evaluation suite against the public sample dataset (`dataset/sample_deletion_requests.csv` and `dataset/sample_output.csv`):
+
+```bash
+python code/evaluation/main.py
+```
+or:
+```bash
+python src/evaluate.py
+```
+
+### Validating Output Integrity
+
+To verify that `output.csv` conforms strictly to the challenge contract:
+
+```bash
+python src/validate_output.py
 ```
 
 The blank template at `dataset/output.csv` is provided as a reference. Your final generated file for submission must be the root-level `output.csv`.
+
 
 
 ## Dataset
