@@ -17,6 +17,12 @@ class UnifiedEvidenceParser:
         self.dataset_dir = dataset_dir
         self.records_by_file_id: Dict[str, List[EvidenceRecord]] = {}
         self.all_records: List[EvidenceRecord] = []
+        self.file_captured_at: Dict[str, str] = {}
+        manifest_path = os.path.join(self.dataset_dir, 'evidence_files.csv')
+        if os.path.exists(manifest_path):
+            with open(manifest_path, mode='r', encoding='utf-8') as f:
+                for row in csv.DictReader(f):
+                    self.file_captured_at[row['file_id']] = row.get('captured_at', '')
         self._load_and_parse_all()
 
     def _load_and_parse_all(self):

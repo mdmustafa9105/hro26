@@ -22,6 +22,15 @@ def evaluate():
 
     engine = DeletionAuditEngine(dataset_dir)
 
+    # Regression check: completed lookup or scan event with rows="0" or http_status="404" means ABSENT
+    ev_34_recs = engine.evidence_parser.records_by_file_id.get('evidence_34', [])
+    rec_map = {r.resource_id: r for r in ev_34_recs}
+    for acc_id in ['account_7653', 'account_3016', 'account_8590']:
+        if acc_id not in rec_map:
+            raise AssertionError(f"Regression check failed: {acc_id} missing in evidence_34")
+        if rec_map[acc_id].state != 'ABSENT':
+            raise AssertionError(f"Regression check failed: {acc_id} in evidence_34 must be ABSENT, found {rec_map[acc_id].state}")
+
     total_cases = len(sample_requests)
     status_matches = 0
     sequence_matches = 0

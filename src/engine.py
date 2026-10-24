@@ -103,6 +103,29 @@ class DeletionAuditEngine:
                     if "@" in word or word.startswith("user_"):
                         self.identity_link_acts.setdefault(word, []).append(a)
 
+        # Snapshot evidence priority for account absence across full dataset timeline
+        origin_priority = {
+            'service_readback_logs': 1,
+            'customer_data_inventory_capture': 2,
+            'service_resource_export': 3,
+            'records_assurance_snapshot_bundle': 4,
+            'customer_account_failover_replica_capture': 5,
+            'customer_data_failover_replica_capture': 6,
+            'customer_data_read_replica_capture': 7,
+            'customer_data_regional_replicas_capture': 8,
+            'customer_data_reporting_replica_capture': 9,
+        }
+        manifest_path = os.path.join(self.dataset_dir, "evidence_files.csv")
+        self.account_snapshots: List[Tuple[str, str]] = []
+        if os.path.exists(manifest_path):
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                ev_files = list(csv.DictReader(f))
+            matching = [f for f in ev_files if f.get("origin") in origin_priority and 
+                        any(r.system_id in ('account_service', 'identity_service') or r.resource_id.startswith(('account_', 'tombstone_')) 
+                            for r in self.evidence_parser.records_by_file_id.get(f['file_id'], []))]
+            matching.sort(key=lambda x: (x["captured_at"][:10], -origin_priority[x["origin"]], x["captured_at"]), reverse=True)
+            self.account_snapshots = [(f["file_id"], f["captured_at"]) for f in matching]
+
     def _resolve_account(self, identity: UserIdentity, case_row: Dict[str, str], user_records: List[EvidenceRecord]) -> Tuple[Optional[str], str]:
         """
         Determines the account_service resource_id and best snapshot evidence_id using Step 2 rules:
@@ -116,22 +139,14 @@ class DeletionAuditEngine:
         req_at = parse_iso(case_row["requested_at"])
         rep_status = case_row.get("reported_status", "")
 
-        # Snapshot evidence priority for account absence
-        account_snapshots = [
-            ("evidence_94", "2026-09-26T10:38:56Z"),
-            ("evidence_93", "2026-09-16T08:37:39Z"),
-            ("evidence_92", "2026-09-15T12:00:00Z"),
-            ("evidence_51", "2026-09-15T10:30:00Z"),
-            ("evidence_54", "2026-09-02T08:00:00Z"),
-        ]
         user_ev_ids = {r.evidence_id for r in user_records if parse_iso(r.captured_at) >= req_at}
         best_ev_id = None
-        for ev_id, cap_time in account_snapshots:
+        for ev_id, cap_time in self.account_snapshots:
             if ev_id in user_ev_ids and cap_time <= audit_at:
                 best_ev_id = ev_id
                 break
         if not best_ev_id:
-            for ev_id, cap_time in account_snapshots:
+            for ev_id, cap_time in self.account_snapshots:
                 if cap_time <= audit_at:
                     best_ev_id = ev_id
                     break
@@ -594,7 +609,6 @@ class DeletionAuditEngine:
 
         # Check if any findings exist
         is_complete = len(findings) == 0
-        deletion_status = "COMPLETE" if is_complete else "INCOMPLETE"
 
         # Fix A: If analytics_platform has no verification step and case is complete, check for anonymized profile in covering evidence
         if is_complete:
@@ -607,6 +621,20 @@ class DeletionAuditEngine:
                         step_no=0, phase="VERIFICATION", system_id="analytics_platform", resource_id=an_res_id,
                         operation="VERIFY_RECORD_ANONYMIZED", state="ANONYMIZED", evidence_id=an_ev_id
                     ))
+
+        # Temporal rule: For COMPLETE, every verification step must have non-empty evidence_id
+        # and proof captured on or before audit_at. If not, fallback to INCOMPLETE.
+        if is_complete:
+            for v in verifications:
+                if not v.evidence_id:
+                    is_complete = False
+                    break
+                ev_cap = self.evidence_parser.file_captured_at.get(v.evidence_id)
+                if ev_cap and ev_cap > audit_at:
+                    is_complete = False
+                    break
+
+        deletion_status = "COMPLETE" if is_complete else "INCOMPLETE"
 
         # If incomplete, ensure retained security_service audit verification check is included if one exists for the user
         if not is_complete:

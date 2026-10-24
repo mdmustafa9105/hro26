@@ -110,24 +110,49 @@ def parse_log_file(file_id: str, file_path: str, origin: str, captured_at: str) 
                 t_id = d.get('trace_id') or d.get('requestId')
                 t_info = traces.get(str(t_id), {}) if t_id else {}
 
+                event_name = str(d.get('event', ''))
+                # Skip started lines and intermediate/noise events
+                if any(k in event_name for k in ['_started', 'connection_acquired', 'dependency_retry', 'dependency_recovered', 'cache_lookup', 'lease_extended', 'flag_snapshot_loaded', 'slow_call_rate']):
+                    continue
+
                 r_id = d.get('resource_id') or t_info.get('resource_id')
                 if r_id:
                     sys_id = d.get('service') or d.get('system') or t_info.get('service') or 'account_service'
+                    
                     state = 'PRESENT'
-                    if d.get('status_code') == 404 or d.get('rows') == 0 or d.get('rows') == '0' or d.get('http_status') == 404:
+                    http_st = str(d.get('http_status') or d.get('status_code') or '')
+                    rows_val = str(d.get('rows', ''))
+                    res_val = str(d.get('result', '')).lower()
+                    avail_val = str(d.get('available', '')).lower()
+
+                    if http_st == '404' or rows_val == '0' or res_val in ('miss', 'not_found') or avail_val in ('false', '0'):
                         state = 'ABSENT'
+                    elif any(c in event_name for c in ['lookup_completed', 'query_completed', 'scan_completed', 'check_completed', 'read_completed']):
+                        if rows_val.isdigit() and int(rows_val) >= 1:
+                            state = 'PRESENT'
+                        elif http_st == '200' or res_val in ('hit', 'found') or avail_val in ('true', '1') or d.get('integrity_check') == 'passed':
+                            state = 'PRESENT'
+                        else:
+                            state = 'ABSENT'
                     elif d.get('enabled') is False or str(d.get('enabled')).lower() in ('false', '0', 'disabled'):
                         state = 'DISABLED'
                     elif d.get('enabled') is True or str(d.get('enabled')).lower() in ('true', '1', 'active'):
                         state = 'ACTIVE'
-                    elif d.get('result') in ('DISABLED', 'disabled') or d.get('status') in ('DISABLED', 'disabled'):
+                    elif res_val in ('disabled',):
                         state = 'DISABLED'
-                    elif d.get('result') in ('ACTIVE', 'active') or d.get('status') in ('ACTIVE', 'active'):
+                    elif res_val in ('active',):
                         state = 'ACTIVE'
-                    elif d.get('restore_allowed') is False or str(d.get('restore_allowed')).lower() in ('false', '0', 'blocked'):
+                    elif event_name == 'restore_candidate_evaluated':
+                        if d.get('deletion_block') in (False, 'false') or d.get('eligible') in (True, 'true') or d.get('restore_allowed') in (True, 'true'):
+                            state = 'ACTIVE'
+                        elif d.get('deletion_block') in (True, 'true') or d.get('restore_allowed') in (False, 'false') or res_val in ('blocked',):
+                            state = 'BLOCKED'
+                        else:
+                            state = 'ACTIVE'
+                    elif d.get('deletion_block') in (False, 'false') or d.get('eligible') in (True, 'true') or d.get('restore_allowed') in (True, 'true'):
+                        state = 'ACTIVE'
+                    elif d.get('deletion_block') in (True, 'true') or d.get('restore_allowed') in (False, 'false') or res_val in ('blocked',):
                         state = 'BLOCKED'
-                    elif d.get('restore_allowed') is True or str(d.get('restore_allowed')).lower() in ('true', '1', 'active'):
-                        state = 'ACTIVE'
 
                     email = d.get('email') or d.get('lookup_key') or d.get('correlation_key') or t_info.get('email')
                     if email and '@' not in str(email):
