@@ -227,14 +227,54 @@ class DeletionAuditEngine:
 
     def _resolve_anonymized_analytics(self, identity: UserIdentity, case_row: Dict[str, str], user_records: List[EvidenceRecord], account_id: Optional[str], account_ev_id: str) -> Optional[Tuple[str, str]]:
         """
-        Fix A: For cases where analytics profile was anonymized in covering evidence,
-        resolves the linked analytics resource and covering evidence.
+        Step 3: Resolves anonymized analytics profile for cases where profile was anonymized in covering evidence.
+        Uses evidence-based linking (trace_id, user references in snapshots/exports/OCR text) first,
+        with time correlation only as a fallback, recorded in self.last_analytics_linking_method.
         """
         rep_at = parse_iso(case_row["reported_at"])
         req_at = parse_iso(case_row["requested_at"])
         aud_at = case_row["audit_at"]
         user_res_ids = {r.resource_id for r in user_records}
 
+        # 1. Evidence-based linking: direct record in user_records
+        for r in user_records:
+            if SYSTEM_NORMALIZATION.get(r.system_id, r.system_id) == "analytics_platform" and r.state == "ANONYMIZED":
+                if parse_iso(r.captured_at) >= req_at and r.captured_at <= aud_at:
+                    self.last_analytics_linking_method = "direct_evidence"
+                    return r.resource_id, r.evidence_id
+
+        # Evidence-based linking: all_records user binding
+        for r in self.evidence_parser.all_records:
+            if SYSTEM_NORMALIZATION.get(r.system_id, r.system_id) == "analytics_platform" and r.links_to_user(identity):
+                r_id = r.resource_id
+                # Find covering evidence where it is ANONYMIZED <= aud_at
+                ev_recs = [er for er in self.evidence_parser.all_records if er.resource_id == r_id and er.captured_at <= aud_at and er.state == "ANONYMIZED"]
+                if ev_recs:
+                    best_ev = next((er for er in ev_recs if er.evidence_id == account_ev_id), ev_recs[0])
+                    self.last_analytics_linking_method = "evidence_all_records_link"
+                    return r_id, best_ev.evidence_id
+
+        # Evidence-based linking: activity link events
+        for em in identity.emails:
+            for act in self.identity_link_acts.get(em.lower(), []):
+                if act.get("event_time", "") <= aud_at and act.get("target_system") == "analytics_platform":
+                    r_id = act["resource_id"]
+                    ev_recs = [er for er in self.evidence_parser.all_records if er.resource_id == r_id and er.captured_at <= aud_at and er.state == "ANONYMIZED"]
+                    if ev_recs:
+                        best_ev = next((er for er in ev_recs if er.evidence_id == account_ev_id), ev_recs[0])
+                        self.last_analytics_linking_method = "activity_direct_link"
+                        return r_id, best_ev.evidence_id
+        if identity.user_id:
+            for act in self.identity_link_acts.get(identity.user_id.lower(), []):
+                if act.get("event_time", "") <= aud_at and act.get("target_system") == "analytics_platform":
+                    r_id = act["resource_id"]
+                    ev_recs = [er for er in self.evidence_parser.all_records if er.resource_id == r_id and er.captured_at <= aud_at and er.state == "ANONYMIZED"]
+                    if ev_recs:
+                        best_ev = next((er for er in ev_recs if er.evidence_id == account_ev_id), ev_recs[0])
+                        self.last_analytics_linking_method = "activity_direct_link"
+                        return r_id, best_ev.evidence_id
+
+        # 2. Time-correlation fallback
         cands = []
         for a in self.activities:
             if a.get("event_type") == "ANONYMIZE_RECORD" and a.get("target_system") == "analytics_platform":
@@ -248,10 +288,13 @@ class DeletionAuditEngine:
                         cands.append((r_id, a_time, best_ev.evidence_id))
 
         if not cands:
+            self.last_analytics_linking_method = "none"
             return None
 
         cands.sort(key=lambda x: x[1])
         if len(cands) == 1:
+            self.last_analytics_linking_method = "time_correlation_fallback"
+            logger.debug("Analytics profile %s linked via time-correlation fallback (single candidate) for case %s", cands[0][0], case_row.get("case_id"))
             return cands[0][0], cands[0][2]
 
         cand_scores = {}
@@ -269,6 +312,8 @@ class DeletionAuditEngine:
 
         if max(cand_scores.values()) > 0:
             best_cand = max(cand_scores.items(), key=lambda x: x[1])[0]
+            self.last_analytics_linking_method = "time_correlation_fallback"
+            logger.debug("Analytics profile %s linked via time-correlation fallback (scored) for case %s", best_cand[0], case_row.get("case_id"))
             return best_cand[0], best_cand[1]
 
         # Check unclaimed
@@ -287,8 +332,12 @@ class DeletionAuditEngine:
                 unclaimed.append((r_id, a_time, ev_id))
 
         if unclaimed:
+            self.last_analytics_linking_method = "time_correlation_fallback"
+            logger.debug("Analytics profile %s linked via time-correlation fallback (unclaimed) for case %s", unclaimed[0][0], case_row.get("case_id"))
             return unclaimed[0][0], unclaimed[0][2]
 
+        self.last_analytics_linking_method = "time_correlation_fallback"
+        logger.debug("Analytics profile %s linked via time-correlation fallback (first) for case %s", cands[0][0], case_row.get("case_id"))
         return cands[0][0], cands[0][2]
 
     def audit_case(self, case_row: Dict[str, str]) -> Tuple[str, List[Dict[str, Any]], Optional[str]]:
