@@ -2,16 +2,23 @@
 
 ## 1. Executive Summary & Benchmark Metrics
 
-The Deletion-Audit Engine was evaluated against the participant-facing public sample dataset (`dataset/sample_deletion_requests.csv` with 32 cases) using the canonical benchmark (`dataset/sample_output.csv`). The evaluation measures decision correctness, identifier reconciliation, policy adherence, and step ordering.
+> [!IMPORTANT]
+> **Sample Dataset Qualification**: The 100.00% (32/32) status accuracy reported below is measured exclusively on the participant-facing public sample dataset (`dataset/sample_deletion_requests.csv` with 32 cases) used to develop and calibrate the engine. **It is not an accuracy estimate on the 518 hidden evaluation cases.**
+>
+> On the hidden set, auditability and heuristics analysis reveals:
+> - **Citation Audit Pass Rate**: **99.09% (1,088 / 1,098 citations passed)** in `output.csv` (100.00% / 75 of 75 passed on sample outputs). All 10 failed citations correspond to cases 433–442 referencing point-in-time readback log `evidence_67`.
+> - **Heuristics & Review Queue Size**: **441 of 518 hidden cases (85.14%)** relied on timing offset tiebreakers, analytics time-correlation fallbacks, pipeline lag heuristics, user_id number derivations, or OCR text proximity bindings (cataloged in `review_queue.csv`).
 
 | Metric | Score | Details |
 | :--- | :--- | :--- |
-| **Case-Level Deletion-Status Accuracy** | **100.00% (32/32)** | Perfect classification across `COMPLETE`, `INCOMPLETE`, and `NOT_APPLICABLE` |
-| **Sequence Accuracy (Exact Match)** | **93.75% (30/32)** | Exact match across all phases, systems, resources, operations, states, and citations |
-| **Step-Level Precision** | **100.00% (191/191)** | 191 of 191 emitted audit steps match canonical steps with zero false positives |
-| **Step-Level Recall** | **98.96% (191/193)** | 191 of 193 canonical audit steps recovered from multi-system evidence |
-| **Field-Level Accuracy** | **99.85%** | Comprehensive accuracy across `phase`, `system_id`, `resource_id`, `operation`, `state`, and `evidence_id` |
-| **Unresolved Cases** | **0 (0.00%)** | Full determinism; 0 cases routed to `unresolved.csv` |
+| **Sample Deletion-Status Accuracy** | **100.00% (32/32)** | Accuracy on public sample dataset (`sample_output.csv`); not a hidden-set estimate |
+| **Sample Sequence Accuracy (Exact Match)** | **93.75% (30/32)** | Exact match across all phases, systems, resources, operations, states, and citations |
+| **Sample Step-Level Precision** | **100.00% (191/191)** | 191 of 191 emitted audit steps match canonical steps with zero false positives |
+| **Sample Step-Level Recall** | **98.96% (191/193)** | 191 of 193 canonical audit steps recovered from multi-system evidence |
+| **Evidence Citation Pass Rate (Sample)** | **100.00% (75/75)** | Verified against raw evidence files, OCR transcripts, and documented bindings |
+| **Evidence Citation Pass Rate (Full 518)** | **99.09% (1088/1098)** | 1,088 of 1,098 non-empty citations grounded; 10 cases cite point-in-time log `evidence_67` |
+| **Review Queue Size (Heuristic Cases)** | **441 / 518 (85.14%)** | Cases utilizing timing tiebreakers, pipeline lag, or fallbacks (logged in `review_queue.csv`) |
+| **Unresolved Cases** | **0 (0.00%)** | 0 cases routed to `unresolved.csv` |
 
 ---
 
