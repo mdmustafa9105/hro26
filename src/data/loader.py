@@ -39,5 +39,4 @@ def load_all():
         'evidence_files': load_csv('evidence_files.csv'),
         'deletion_requests': load_csv('deletion_requests.csv'),
         'sample_requests': load_csv('sample_deletion_requests.csv'),
-        'sample_output': load_csv('sample_output.csv'),
     }
