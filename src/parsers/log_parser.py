@@ -48,14 +48,16 @@ def parse_log_file(file_id: str, file_path: str, origin: str, captured_at: str) 
     # Second pass: parse records
     for line in lines:
         # Case A: JSON structured log line
-        if line.startswith('{') and line.endswith('}'):
+        json_start = line.find('{')
+        json_end = line.rfind('}')
+        if json_start != -1 and json_end > json_start:
             try:
-                d = json.loads(line)
+                d = json.loads(line[json_start:json_end+1])
                 r_id = d.get('resource_id')
                 if r_id:
                     sys_id = d.get('service') or d.get('system') or 'account_service'
                     state = 'PRESENT'
-                    if d.get('status_code') == 404 or d.get('rows') == 0 or d.get('http_status') == 404:
+                    if d.get('status_code') == 404 or d.get('rows') == 0 or d.get('rows') == '0' or d.get('http_status') == 404:
                         state = 'ABSENT'
                     elif d.get('enabled') is False or str(d.get('enabled')).lower() == 'false':
                         state = 'DISABLED'
@@ -80,6 +82,27 @@ def parse_log_file(file_id: str, file_path: str, origin: str, captured_at: str) 
                     if user_id and not str(user_id).startswith('user_'):
                         user_id = None
 
+                    data_cat = 'USER_PROFILE'
+                    if sys_id == 'search_service':
+                        data_cat = 'SEARCH_INDEX_ENTRY'
+                    elif sys_id == 'analytics_platform':
+                        data_cat = 'ANALYTICS_PROFILE'
+                    elif sys_id in ('support_platform', 'support_replica'):
+                        if r_id.startswith('support_00') or r_id.startswith('attachment_'):
+                            data_cat = 'SUPPORT_ATTACHMENT'
+                        else:
+                            data_cat = 'SUPPORT_MESSAGE'
+                    elif sys_id in ('backup_service', 'backup_restore_service'):
+                        data_cat = 'BACKUP_ARCHIVE'
+                    elif sys_id in ('integration_service', 'integration_admin'):
+                        data_cat = 'DATA_FLOW'
+                    elif sys_id == 'security_service':
+                        data_cat = 'SECURITY_AUDIT_LOG'
+                    elif sys_id == 'export_service':
+                        data_cat = 'USER_EXPORT'
+                    elif sys_id == 'identity_service':
+                        data_cat = 'ACCOUNT_TOMBSTONE'
+
                     records.append(EvidenceRecord(
                         evidence_id=file_id,
                         file_path=file_path,
@@ -87,7 +110,7 @@ def parse_log_file(file_id: str, file_path: str, origin: str, captured_at: str) 
                         origin=origin,
                         system_id=sys_id,
                         resource_id=r_id,
-                        data_category='USER_PROFILE',
+                        data_category=data_cat,
                         state=state,
                         user_id=user_id,
                         customer_reference=d.get('customer_reference'),

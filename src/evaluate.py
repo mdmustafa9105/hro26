@@ -37,7 +37,6 @@ def evaluate():
         expected_row = golden_outputs.get(case_id, {})
         expected_status = expected_row.get('deletion_status')
         expected_steps = json.loads(expected_row.get('steps_json', '[]'))
-
         pred_status, pred_steps, unresolved_reason = engine.audit_case(req)
 
         if unresolved_reason:
@@ -56,7 +55,6 @@ def evaluate():
         seq_ok = (pred_status == expected_status and pred_steps == expected_steps)
         if seq_ok:
             sequence_matches += 1
-
         # 3. Step level match
         total_expected_steps += len(expected_steps)
         total_predicted_steps += len(pred_steps)
