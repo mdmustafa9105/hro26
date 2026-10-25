@@ -1,0 +1,50 @@
+{
+  "evidence_custom_01": [
+    {
+      "evidence_id": "evidence_custom_01",
+      "file_path": "D:\\hackerrank-orchestrate-october26\\code\\evaluation\\extra_cases\\evidence/logs/stream_monitor_custom_01.log",
+      "captured_at": "2026-07-13T10:00:00Z",
+      "origin": "integration_service",
+      "system_id": "integration_service",
+      "resource_id": "data_flow_9011",
+      "data_category": "DATA_FLOW",
+      "state": "ACTIVE",
+      "user_id": null,
+      "customer_reference": null,
+      "subject_reference": null,
+      "email": "marcus.vance@techcorp.io",
+      "phone": null,
+      "email_hash": null,
+      "name": null,
+      "raw_details": {
+        "line": "2026-07-13T10:00:00Z level=INFO service=integration_service trace_id=tr-9901 user_id=user_901 email=marcus.vance@techcorp.io resource_id=data_flow_9011 status=ACTIVE enabled=true stream=analytics_warehouse_sync"
+      }
+    }
+  ],
+  "evidence_custom_02": [
+    {
+      "evidence_id": "evidence_custom_02",
+      "file_path": "D:\\hackerrank-orchestrate-october26\\code\\evaluation\\extra_cases\\evidence/records/tombstone_register_custom_02.json",
+      "captured_at": "2026-08-04T12:00:00Z",
+      "origin": "identity_service",
+      "system_id": "identity_service",
+      "resource_id": "tombstone_4491",
+      "data_category": "ACCOUNT_TOMBSTONE",
+      "state": "PRESENT",
+      "user_id": "user_902",
+      "customer_reference": null,
+      "subject_reference": null,
+      "email": "priya.sharma92@outlook.com",
+      "phone": "+1-555-0192",
+      "email_hash": null,
+      "name": null,
+      "raw_details": {
+        "resource_id": "tombstone_4491",
+        "user_id": "user_902",
+        "email": "priya.sharma92@outlook.com",
+        "phone": "+1-555-0192",
+        "status": "DELETED"
+      }
+    }
+  ]
+}

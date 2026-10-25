@@ -1,0 +1,4 @@
+case_id,email,requested_at,reported_status,reported_at,audit_at,request_text
+custom_01,marcus.vance@techcorp.io,2026-07-10T08:00:00Z,COMPLETE,2026-07-12T08:00:00Z,2026-07-15T12:00:00Z,I request full deletion of my account and all associated data streams under GDPR Article 17.
+custom_02,priya.sharma92@outlook.com,2026-08-01T10:00:00Z,COMPLETE,2026-08-03T10:00:00Z,2026-08-05T10:00:00Z,Please delete my account and ensure no personal information remains linked to my profile.
+custom_03,carlos.mendez@empresa.es,2026-09-12T14:30:00Z,NOT_STARTED,2026-09-12T14:30:00Z,2026-09-15T14:30:00Z,"Por favor envíenme una copia de todas mis facturas del año pasado. No quiero cerrar mi cuenta, solo necesito el archivo de exportación."

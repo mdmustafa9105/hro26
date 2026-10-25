@@ -61,33 +61,4 @@ def parse_pdf_file(file_id: str, file_path: str, origin: str, captured_at: str) 
                 email=best_email,
                 raw_details={'text_snippet': text[:500]}
             ))
-    elif emails or users:
-        # If no explicit resource_id like support_001, create record with document name as resource
-        for u in users:
-            records.append(EvidenceRecord(
-                evidence_id=file_id,
-                file_path=file_path,
-                captured_at=captured_at,
-                origin=origin,
-                system_id='legal_retention_service' if 'legal' in file_path else 'account_service',
-                resource_id=f"doc_{u}",
-                data_category='LEGAL_HOLD_RECORD' if 'legal' in file_path else 'USER_PROFILE',
-                state='PRESENT',
-                user_id=u,
-                raw_details={'text_snippet': text[:500]}
-            ))
-        for e in emails:
-            records.append(EvidenceRecord(
-                evidence_id=file_id,
-                file_path=file_path,
-                captured_at=captured_at,
-                origin=origin,
-                system_id='account_service',
-                resource_id=f"doc_{e}",
-                data_category='USER_PROFILE',
-                state='PRESENT',
-                email=e.lower(),
-                raw_details={'text_snippet': text[:500]}
-            ))
-
     return records

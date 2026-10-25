@@ -26,10 +26,12 @@ class UnifiedEvidenceParser:
         self._load_and_parse_all()
 
     def _load_and_parse_all(self):
+        cache_name = 'evidence_cache.json' if os.path.basename(os.path.abspath(self.dataset_dir)) == 'dataset' else f"evidence_cache_{os.path.basename(os.path.abspath(self.dataset_dir))}.json"
+        self.cache_file = os.path.join(os.path.dirname(__file__), cache_name)
         # Check if cache exists
-        if os.path.exists(CACHE_FILE):
+        if os.path.exists(self.cache_file):
             try:
-                with open(CACHE_FILE, 'r', encoding='utf-8') as f:
+                with open(self.cache_file, 'r', encoding='utf-8') as f:
                     cached_data = json.load(f)
                 for file_id, rec_list in cached_data.items():
                     recs = [EvidenceRecord(**r) for r in rec_list]
@@ -73,7 +75,7 @@ class UnifiedEvidenceParser:
 
         # Save cache
         try:
-            with open(CACHE_FILE, 'w', encoding='utf-8') as f:
+            with open(self.cache_file, 'w', encoding='utf-8') as f:
                 json.dump(cache_dict, f, indent=2)
         except Exception:
             pass

@@ -1,0 +1,4 @@
+user_id,name,email,phone,email_hash,updated_at
+user_901,Marcus Vance,marcus.vance@techcorp.io,+1-555-0101,a1b2c3d4e5f601,2026-01-01T00:00:00Z
+user_902,Priya Sharma,priya.sharma92@outlook.com,+1-555-0192,a1b2c3d4e5f602,2026-01-01T00:00:00Z
+user_903,Carlos Mendez,carlos.mendez@empresa.es,+34-600-0001,a1b2c3d4e5f603,2026-01-01T00:00:00Z

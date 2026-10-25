@@ -1,0 +1,17 @@
+{
+  "snapshots": [
+    {
+      "data_store": "identity_service",
+      "collection": "account_tombstones",
+      "records": [
+        {
+          "resource_id": "tombstone_4491",
+          "user_id": "user_902",
+          "email": "priya.sharma92@outlook.com",
+          "phone": "+1-555-0192",
+          "status": "DELETED"
+        }
+      ]
+    }
+  ]
+}

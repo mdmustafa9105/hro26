@@ -105,15 +105,14 @@ class DeletionAuditEngine:
 
         # Snapshot evidence priority for account absence across full dataset timeline
         origin_priority = {
-            'service_readback_logs': 1,
-            'customer_data_inventory_capture': 2,
-            'service_resource_export': 3,
-            'records_assurance_snapshot_bundle': 4,
-            'customer_account_failover_replica_capture': 5,
-            'customer_data_failover_replica_capture': 6,
-            'customer_data_read_replica_capture': 7,
-            'customer_data_regional_replicas_capture': 8,
-            'customer_data_reporting_replica_capture': 9,
+            'customer_data_inventory_capture': 1,
+            'service_resource_export': 2,
+            'records_assurance_snapshot_bundle': 3,
+            'customer_account_failover_replica_capture': 4,
+            'customer_data_failover_replica_capture': 5,
+            'customer_data_read_replica_capture': 6,
+            'customer_data_regional_replicas_capture': 7,
+            'customer_data_reporting_replica_capture': 8,
         }
         manifest_path = os.path.join(self.dataset_dir, "evidence_files.csv")
         self.account_snapshots: List[Tuple[str, str]] = []
@@ -202,6 +201,8 @@ class DeletionAuditEngine:
                     competitor_accounts.add(r.resource_id)
 
         valid_d_acts = [d for d in self.delete_account_acts if abs((rep_at - parse_iso(d["event_time"])).total_seconds()) <= 7200]
+        if not valid_d_acts:
+            valid_d_acts = [d for d in self.delete_account_acts if req_at <= parse_iso(d["event_time"]) <= rep_at]
         candidates = [d for d in valid_d_acts if d["resource_id"] not in competitor_accounts]
 
         # (c) Use reported_status vs worker result only as a soft filter
@@ -234,10 +235,7 @@ class DeletionAuditEngine:
             chosen = min(candidates, key=lambda d: abs((rep_at - parse_iso(d["event_time"])).total_seconds() - target_offset))
             return chosen["resource_id"], best_ev_id
 
-        # General fallback: user_id number if known
-        if identity.user_id and identity.user_id.startswith("user_"):
-            return f"account_{int(identity.user_id.split('_')[1]):03d}", best_ev_id
-
+        # Where no candidate matches, do not invent a resource ID
         return None, best_ev_id
 
     def _resolve_anonymized_analytics(self, identity: UserIdentity, case_row: Dict[str, str], user_records: List[EvidenceRecord], account_id: Optional[str], account_ev_id: str) -> Optional[Tuple[str, str]]:
@@ -401,6 +399,10 @@ class DeletionAuditEngine:
 
         # Check if account_service is present in resources_map
         has_account = any(k[0] == "account_service" for k in resources_map)
+
+        unres_reason = None
+        if not has_account and not account_id:
+            unres_reason = f"No account candidate or evidence found for user {identity.user_id} ({identity.name}); fallback account ID disallowed"
 
         findings: List[AuditStep] = []
         remediations: List[AuditStep] = []
@@ -687,4 +689,4 @@ class DeletionAuditEngine:
             step.step_no = idx
             final_steps.append(step.to_dict())
 
-        return deletion_status, final_steps, None
+        return deletion_status, final_steps, unres_reason

@@ -1,0 +1,1 @@
+2026-07-13T10:00:00Z level=INFO service=integration_service trace_id=tr-9901 user_id=user_901 email=marcus.vance@techcorp.io resource_id=data_flow_9011 status=ACTIVE enabled=true stream=analytics_warehouse_sync

@@ -224,7 +224,7 @@ def parse_log_file(file_id: str, file_path: str, origin: str, captured_at: str) 
         if any(k in line for k in ['_started', 'connection_acquired', 'dependency_retry', 'dependency_recovered', 'lease_extended', 'consumer_lag']):
             continue
 
-        r_match = re.search(r'\bresource_id=([a-zA-Z0-9_\-]+)', line)
+        r_match = re.search(r'\bresource_id=(?:"|\')?([a-zA-Z0-9_\-]+)(?:"|\')?', line)
         t_match = re.search(r'["\']?trace_id["\']?\s*[:=]\s*["\']?([a-zA-Z0-9_\-]+)', line, re.I)
         if not t_match:
             t_match = re.search(r'requestId=([a-zA-Z0-9_\-]+)', line, re.I)
@@ -236,12 +236,18 @@ def parse_log_file(file_id: str, file_path: str, origin: str, captured_at: str) 
         if not r_id:
             continue
 
+        sys_match = re.search(r'\bsystem=(?:"|\')?([a-zA-Z0-9_\-]+)(?:"|\')?', line)
         s_match = re.search(r'\bservice=([a-zA-Z0-9_\-]+)', line)
-        sys_id = s_match.group(1) if s_match else (t_info.get('service') or origin)
+        if sys_match and sys_match.group(1) not in ('downstream_delivery_service', 'central_observability'):
+            sys_id = sys_match.group(1)
+        elif s_match and s_match.group(1) != 'downstream_delivery_service':
+            sys_id = s_match.group(1)
+        else:
+            sys_id = t_info.get('service') or origin
 
         # Email
         email = t_info.get('email')
-        e_match = re.search(r'\b(?:email|lookup_key|requester_email|customer_email|correlation_key|subject_key|matched_value)=(?:")?([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})(?:")?', line, re.I)
+        e_match = re.search(r'\b(?:email|lookup_key|requester_email|customer_email|correlation_key|subject_key|matched_value|subject_reference)=(?:")?([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})(?:")?', line, re.I)
         if e_match:
             email = e_match.group(1).lower()
 
@@ -253,7 +259,7 @@ def parse_log_file(file_id: str, file_path: str, origin: str, captured_at: str) 
 
         # User id / correlation key / subject reference
         user_id = t_info.get('user_id')
-        u_match = re.search(r'\b(?:lookup_key|correlation_key|subject_reference|subject_ref|subject_key|customer_reference)=(?:")?(user_\d+)(?:")?', line, re.I)
+        u_match = re.search(r'\b(?:lookup_key|correlation_key|subject_reference|subject_ref|subject_key|customer_reference|user_id)=(?:")?(user_\d+)(?:")?', line, re.I)
         if u_match:
             user_id = u_match.group(1).lower()
 
@@ -272,7 +278,7 @@ def parse_log_file(file_id: str, file_path: str, origin: str, captured_at: str) 
         # Determine state
         state = 'PRESENT'
         clean_line = line.replace('"', '').replace("'", "")
-        if 'http_status=404' in clean_line or 'rows=0' in clean_line or 'total_hits=0' in clean_line or 'status=NOT_FOUND' in clean_line:
+        if 'http_status=404' in clean_line or 'rows=0' in clean_line or 'total_hits=0' in clean_line or 'status=NOT_FOUND' in clean_line or 'result=NOT_FOUND' in clean_line:
             state = 'ABSENT'
         elif any(k in clean_line for k in ('enabled=true', 'enabled=1', 'status=ACTIVE', 'result=ACTIVE', 'remains enabled', 'is active')):
             state = 'ACTIVE'
@@ -282,7 +288,7 @@ def parse_log_file(file_id: str, file_path: str, origin: str, captured_at: str) 
             state = 'BLOCKED'
         elif any(k in clean_line for k in ('restore_allowed=true', 'deletion_block=false')):
             state = 'ACTIVE'
-        elif 'marker_found=false' in clean_line:
+        elif any(k in clean_line for k in ('result=FOUND', 'result=IDENTIFIABLE', 'marker_found=false')):
             state = 'PRESENT'
         elif 'marker_found=true' in clean_line:
             state = 'ABSENT'
@@ -312,6 +318,10 @@ def parse_log_file(file_id: str, file_path: str, origin: str, captured_at: str) 
             data_cat = 'USER_EXPORT'
         elif sys_id == 'identity_service':
             data_cat = 'ACCOUNT_TOMBSTONE'
+
+        rt_match = re.search(r'\brecord_type=(?:"|\')?([A-Z_]+)(?:"|\')?', line)
+        if rt_match:
+            data_cat = rt_match.group(1)
 
         records.append(EvidenceRecord(
             evidence_id=file_id,

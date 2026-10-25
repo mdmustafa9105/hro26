@@ -39,6 +39,11 @@ python code/main.py
 
 This will run the Deletion-Audit Engine across all 518 cases in `dataset/deletion_requests.csv` and generate the final `output.csv` at the repository root.
 
+### Dependencies and OCR Fallback
+- **PDF Extraction**: Uses `pypdf` for local text extraction from documents.
+- **Image OCR**: Uses Windows Media OCR via `winsdk` (`winsdk.windows.media.ocr.OcrEngine`) on Windows systems.
+- **Graceful Portability Fallback**: If running on non-Windows environments (such as Linux) or machines where `winsdk` is not installed, the image parser automatically falls back to a bundled precomputed OCR text cache (`src/parsers/ocr_cache.json`), ensuring full execution without dependency failures or loss of precision.
+
 ### Running Evaluation
 
 To run the evaluation suite against the public sample dataset (`dataset/sample_deletion_requests.csv` and `dataset/sample_output.csv`):

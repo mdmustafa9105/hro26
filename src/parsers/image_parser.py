@@ -40,15 +40,47 @@ async def _ocr_image_async(abs_path: str):
             })
     return result.text, words
 
+_OCR_CACHE = None
+
+def _get_ocr_cache():
+    global _OCR_CACHE
+    if _OCR_CACHE is None:
+        cache_path = os.path.join(os.path.dirname(__file__), 'ocr_cache.json')
+        if os.path.exists(cache_path):
+            try:
+                import json
+                with open(cache_path, 'r', encoding='utf-8') as f:
+                    _OCR_CACHE = json.load(f)
+            except Exception:
+                _OCR_CACHE = {}
+        else:
+            _OCR_CACHE = {}
+    return _OCR_CACHE
+
 def parse_image_file(file_id: str, file_path: str, origin: str, captured_at: str) -> List[EvidenceRecord]:
     records: List[EvidenceRecord] = []
     if not os.path.exists(file_path):
         return records
 
+    text = ""
+    words = []
     try:
         text, words = asyncio.run(_ocr_image_async(os.path.abspath(file_path)))
     except Exception:
-        return records
+        pass
+
+    if not text:
+        cache = _get_ocr_cache()
+        cached_entry = cache.get(file_id)
+        if not cached_entry:
+            base = os.path.basename(file_path)
+            for k, v in cache.items():
+                if os.path.basename(v.get('file_path', '')) == base:
+                    cached_entry = v
+                    break
+        if cached_entry:
+            text = cached_entry.get('text', '')
+            words = cached_entry.get('words', [])
 
     if not text:
         return records

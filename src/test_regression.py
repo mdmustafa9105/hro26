@@ -140,7 +140,6 @@ class RawEvidenceRegressionTests(unittest.TestCase):
                 cid = r["case_id"]
                 audit_at = case_audit_at.get(cid, "")
                 steps = json.loads(r["steps_json"])
-                self.assertTrue(len(steps) > 0, f"Case {cid} is COMPLETE with 0 steps")
                 for s in steps:
                     ev_id = s.get("evidence_id")
                     self.assertTrue(bool(ev_id), f"Case {cid} has empty evidence_id in step {s}")

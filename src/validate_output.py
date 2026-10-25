@@ -1,6 +1,9 @@
 import csv
 import json
+import re
 import sys
+
+RESOURCE_ID_REGEX = re.compile(r'^(account|search|support|export|analytics|backup|data_flow|audit_record|tombstone)_\d+$')
 
 print("Validating output.csv...")
 with open("output.csv", "r", encoding="utf-8") as f:
@@ -51,6 +54,7 @@ for idx, r in enumerate(rows, start=1):
         assert step["state"] in allowed_states, f"Row {idx} ({cid}) invalid state: {step['state']}"
         assert "system_id" in step and step["system_id"], f"Row {idx} ({cid}) missing system_id"
         assert "resource_id" in step and step["resource_id"], f"Row {idx} ({cid}) missing resource_id"
+        assert RESOURCE_ID_REGEX.match(step["resource_id"]), f"Row {idx} ({cid}) resource_id '{step['resource_id']}' does not match required format"
 
         p_idx = phase_order_map[step["phase"]]
         assert p_idx >= cur_phase_idx, f"Row {idx} ({cid}) phase ordering violation: {step['phase']} after higher phase"
